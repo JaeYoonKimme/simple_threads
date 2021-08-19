@@ -16,6 +16,11 @@
                          setcontext(), swapcontext() */
 #include <stdbool.h>  /* true, false */
 
+#include <sys/time.h>
+#include <signal.h>
+#include <string.h>
+
+#define MS 50
 #include "sthreads.h"
 
 /* Stack size for each context. */
@@ -26,35 +31,34 @@
 
                 Add data structures to manage the threads here.
 ********************************************************************************/
-thread_t ** table;
+thread_t * table;
+thread_t * tail;
+thread_t * cursor;
 int tidnum = 0;
 
-ucontext_t sched_ctx;
 /*******************************************************************************
                              Auxiliary functions
 
                       Add internal helper functions here.
 ********************************************************************************/
+ucontext_t sched_ctx;
+
 void 
-scheduler()
+scheduler ()
 {
-	thread_t * t;
 	while(1){	
-		for(int i = 0; i < tidnum; i++){
-			t = table[i];
-			printf("tid : %d\n",t -> tid);
-			swapcontext(&sched_ctx, &(t -> ctx));
+		for(cursor = table -> next; cursor != 0x0; cursor = cursor -> next){	
+			if(cursor -> state == ready){
+				cursor -> state = running;
+				swapcontext(&sched_ctx, &(cursor -> ctx));
+			}
 		}
 	}
 }
 
-
-
-/*******************************************************************************
-                    Implementation of the Simple Threads API
-********************************************************************************/
-
-void init_context(ucontext_t *ctx, ucontext_t *next){
+void 
+init_context (ucontext_t *ctx, ucontext_t *next)
+{
 	void * stack = malloc(STACK_SIZE);
 
 	if(stack == NULL){
@@ -73,18 +77,46 @@ void init_context(ucontext_t *ctx, ucontext_t *next){
 	ctx->uc_stack.ss_flags = 0;
 }
 
+void 
+set_timer (void (*handler) (int), int ms)
+{
+	struct itimerval timer;
+	signal(SIGALRM, handler);
+
+	timer.it_value.tv_sec = 0;
+	timer.it_value.tv_usec = ms*10;
+	timer.it_interval.tv_sec = 0;
+	timer.it_interval.tv_usec = 0;
+
+	if(setitimer (ITIMER_REAL, &timer, NULL) < 0){
+		perror("timer set");
+		exit(EXIT_FAILURE);
+	}
+}
+
+void
+timer_handler (int signum)
+{
+	printf("------------Timer Inturrupt!!----------\n");
+	set_timer(timer_handler, MS);
+	yield();
+}
+
+/*******************************************************************************
+                    Implementation of the Simple Threads API
+********************************************************************************/
 int init(){
 	//init sched_context
 	init_context(&sched_ctx,NULL);
 	makecontext(&sched_ctx,scheduler, 0);
 
 	//allocate table
-	table = (thread_t**) malloc (sizeof(thread_t*));
+	table = (thread_t*) malloc (sizeof(thread_t));
 	if(table == NULL){
 		perror("malloc");
 		exit(EXIT_FAILURE);
 	}
-	
+
 	//init main_thread
 	thread_t* main_thread;
 	main_thread = (thread_t*) malloc(sizeof(thread_t));
@@ -92,36 +124,93 @@ int init(){
 		perror("malloc main thread");
 		exit(EXIT_FAILURE);
 	}
-	
+
 	ucontext_t main_ctx;	
 	init_context(&main_ctx, NULL);
 
 	main_thread->ctx = main_ctx;
-	main_thread->tid = tidnum;
-	main_thread->state = ready; //?not sure
-	table[tidnum] = main_thread;
-	tidnum ++;
+	main_thread->tid = ++tidnum;
+	main_thread->state = ready; 
+	main_thread->next = 0x0;
+	table -> next = main_thread;
+	tail = main_thread;
 
 	//init main context
 	swapcontext(&main_ctx,&sched_ctx);
-
+	set_timer(timer_handler,MS);
 	return 1;
 }
 
-tid_t spawn(void (*start)()){
-	
-	return -1;
+tid_t 
+spawn(void (*start)())
+{
+	thread_t* new_thread;
+	new_thread = (thread_t*) malloc(sizeof(thread_t));
+	if(new_thread == NULL){
+		perror("spawn malloc error");
+		exit(EXIT_FAILURE);
+	}
+
+	ucontext_t new_ctx;
+	init_context(&new_ctx, NULL);
+	makecontext(&new_ctx, start, 0);
+	new_thread->ctx = new_ctx;
+	new_thread->tid = ++tidnum;
+	new_thread->state = ready;
+	new_thread->next = 0x0;
+	tail -> next = new_thread;
+	tail = new_thread;
+
+	return new_thread -> tid;
 }
 
-void yield(){
-	//여기서 콘택스트를 하나 만들고,
-	//스케쥴러와 스왑해야한다
-	//state 를 언제 어떻게 바꿔줘야하는지 ..
+void 
+yield()
+{
+	thread_t *cur_thread = cursor;
+	if(cur_thread -> state != running){
+		perror("state error");
+		exit(EXIT_FAILURE);
+	}
+
+	cur_thread -> state = ready;
+	swapcontext(&(cur_thread -> ctx), &sched_ctx);
 }
 
-void  done(){
+void
+done()
+{
+	thread_t *cur_thread = cursor;
+	cursor -> state = terminated;
+
+	for(thread_t * itr = table -> next; itr != 0x0; itr = itr -> next){
+		if(itr -> state == waiting){
+			itr -> state = ready;
+		}
+	}
+	swapcontext(&(cur_thread -> ctx), &sched_ctx);
 }
 
-tid_t join() {
-  return -1;
+tid_t 
+join() 
+{
+	thread_t *cur_thread = cursor;
+	cursor -> state = waiting;
+	swapcontext(&(cur_thread -> ctx), &sched_ctx);
+
+	tid_t tid;
+	for(thread_t * itr = table; itr != 0x0; itr = itr -> next){
+		if(itr -> next != 0x0 && itr -> next -> state == terminated){
+			//erase this thread from list
+			thread_t * gone = itr -> next;
+			tid = gone -> tid;
+
+			itr -> next = gone -> next;
+			if(tail == gone){
+				tail = itr;
+			}
+			free(gone);
+		}
+	}
+	return tid;
 }

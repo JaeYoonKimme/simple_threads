@@ -119,17 +119,52 @@ void magic_numbers() {
   }
 }
 
+int id = 0;
+void counter() {
+	int n = 0;
+	int own_id = id ++;
+	while(true){
+		printf("id : %d -> count : %d\n",own_id,n);
+		n ++;
+	}
+}
 
 /*******************************************************************************
                                      main()
 
             Here you should add code to test the Simple Threads API.
 ********************************************************************************/
+void test_senario1(){
+	puts("\n==== Test program for the Simple Threads API ====\n");
+		init(); // Initialization
+		spawn(counter);
+		printf("spawned counter1\n");
+		spawn(counter);
+		printf("Spawned counter2\n");
+		spawn(counter);
+		printf("spawned counter3\n");
+		spawn(counter);
+		printf("spawned counter4\n");
+		while(true){
+			yield();
+		}
+
+}
 
 
 int main(){
 	puts("\n==== Test program for the Simple Threads API ====\n");
-
 	init(); // Initialization
-	printf("hello world\n");
+	spawn(counter);
+	printf("spawned counter1\n");
+	spawn(counter);
+	printf("Spawned counter2\n");
+	spawn(counter);
+	printf("spawned counter3\n");
+	spawn(counter);
+	printf("spawned counter4\n");
+
+	while(true){
+		//yield();
+	}
 }
