@@ -121,11 +121,15 @@ void magic_numbers() {
 
 int id = 0;
 void counter() {
-	int n = 0;
+	int count = 0;
 	int own_id = id ++;
 	while(true){
-		printf("id : %d -> count : %d\n",own_id,n);
-		n ++;
+		printf("id : %d -> count : %d\n",own_id,count);
+		count ++;
+		
+		if(count == 100000){
+			done();
+		}
 	}
 }
 
@@ -164,7 +168,14 @@ int main(){
 	spawn(counter);
 	printf("spawned counter4\n");
 
-	while(true){
-		//yield();
-	}
+	//while(true){
+	join();
+	join();
+	join();
+	join();
+	//yield();
+	//join();	
+	//while(1){
+	//}
+	printf("All done\n");
 }

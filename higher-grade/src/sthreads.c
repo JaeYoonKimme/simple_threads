@@ -48,8 +48,9 @@ scheduler ()
 {
 	while(1){	
 		for(cursor = table -> next; cursor != 0x0; cursor = cursor -> next){	
-			if(cursor -> state == ready){
+			if(cursor != 0x0 && cursor -> state == ready){
 				cursor -> state = running;
+				set_timer(timer_handler, MS);
 				swapcontext(&sched_ctx, &(cursor -> ctx));
 			}
 		}
@@ -61,7 +62,7 @@ init_context (ucontext_t *ctx, ucontext_t *next)
 {
 	void * stack = malloc(STACK_SIZE);
 
-	if(stack == NULL){
+	if(stack == 0x0){
 		perror("STACK MALLOC");
 		exit(EXIT_FAILURE);
 	}
@@ -81,15 +82,36 @@ void
 set_timer (void (*handler) (int), int ms)
 {
 	struct itimerval timer;
+	//struct sigaction sa;
+
+	//memset(&sa, 0, sizeof(sa));
+	//sa.sa_handler = handler;
+	//sigaction(SIGALRM, &sa, NULL);
+
 	signal(SIGALRM, handler);
 
 	timer.it_value.tv_sec = 0;
-	timer.it_value.tv_usec = ms*10;
+	timer.it_value.tv_usec = ms*1000;
 	timer.it_interval.tv_sec = 0;
 	timer.it_interval.tv_usec = 0;
 
-	if(setitimer (ITIMER_REAL, &timer, NULL) < 0){
+	if(setitimer (ITIMER_REAL, &timer, 0x0) < 0){
 		perror("timer set");
+		exit(EXIT_FAILURE);
+	}
+}
+
+void
+disable_timer ()
+{
+	struct itimerval timer;
+	timer.it_value.tv_sec = 0;
+	timer.it_value.tv_usec = 0;
+	timer.it_interval.tv_sec = 0;
+	timer.it_interval.tv_usec = 0;
+
+	if(setitimer(ITIMER_REAL, &timer, 0x0) < 0){
+		perror("disable timer set");
 		exit(EXIT_FAILURE);
 	}
 }
@@ -98,21 +120,21 @@ void
 timer_handler (int signum)
 {
 	printf("------------Timer Inturrupt!!----------\n");
-	set_timer(timer_handler, MS);
+	//set_timer(timer_handler, MS);
 	yield();
 }
 
 /*******************************************************************************
                     Implementation of the Simple Threads API
 ********************************************************************************/
-int init(){
+int init (){
 	//init sched_context
-	init_context(&sched_ctx,NULL);
+	init_context(&sched_ctx, 0x0);
 	makecontext(&sched_ctx,scheduler, 0);
 
 	//allocate table
 	table = (thread_t*) malloc (sizeof(thread_t));
-	if(table == NULL){
+	if(table == 0x0){
 		perror("malloc");
 		exit(EXIT_FAILURE);
 	}
@@ -120,13 +142,13 @@ int init(){
 	//init main_thread
 	thread_t* main_thread;
 	main_thread = (thread_t*) malloc(sizeof(thread_t));
-	if(main_thread == NULL){
+	if(main_thread == 0x0){
 		perror("malloc main thread");
 		exit(EXIT_FAILURE);
 	}
 
 	ucontext_t main_ctx;	
-	init_context(&main_ctx, NULL);
+	init_context(&main_ctx, 0x0);
 
 	main_thread->ctx = main_ctx;
 	main_thread->tid = ++tidnum;
@@ -142,11 +164,11 @@ int init(){
 }
 
 tid_t 
-spawn(void (*start)())
+spawn (void (*start)())
 {
 	thread_t* new_thread;
 	new_thread = (thread_t*) malloc(sizeof(thread_t));
-	if(new_thread == NULL){
+	if(new_thread == 0x0){
 		perror("spawn malloc error");
 		exit(EXIT_FAILURE);
 	}
@@ -165,43 +187,60 @@ spawn(void (*start)())
 }
 
 void 
-yield()
+yield ()
 {
+	disable_timer();//
 	thread_t *cur_thread = cursor;
 	if(cur_thread -> state != running){
+		if(cur_thread -> state == terminated){
+			printf("termin...\n");
+		}
+		if(cur_thread -> state == ready){
+			printf("ready...\n");
+		}
 		perror("state error");
 		exit(EXIT_FAILURE);
 	}
 
 	cur_thread -> state = ready;
+
+	//set_timer(timer_handler, MS);//
 	swapcontext(&(cur_thread -> ctx), &sched_ctx);
 }
 
 void
-done()
+done ()
 {
+	disable_timer();
 	thread_t *cur_thread = cursor;
-	cursor -> state = terminated;
-
-	for(thread_t * itr = table -> next; itr != 0x0; itr = itr -> next){
+	
+	thread_t *itr;
+	for(itr = table -> next; itr != 0x0; itr = itr -> next){
 		if(itr -> state == waiting){
 			itr -> state = ready;
 		}
 	}
+	if(itr == 0x0){
+		yield();
+	}
+	
+	cur_thread -> state = terminated;
+	//set_timer(timer_handler,MS);
 	swapcontext(&(cur_thread -> ctx), &sched_ctx);
 }
 
 tid_t 
-join() 
+join () 
 {
+	disable_timer();
 	thread_t *cur_thread = cursor;
 	cursor -> state = waiting;
+	//set_timer(timer_handler,MS);
 	swapcontext(&(cur_thread -> ctx), &sched_ctx);
 
 	tid_t tid;
 	for(thread_t * itr = table; itr != 0x0; itr = itr -> next){
 		if(itr -> next != 0x0 && itr -> next -> state == terminated){
-			//erase this thread from list
 			thread_t * gone = itr -> next;
 			tid = gone -> tid;
 
@@ -209,6 +248,7 @@ join()
 			if(tail == gone){
 				tail = itr;
 			}
+			free(gone -> ctx.uc_stack.ss_sp);
 			free(gone);
 		}
 	}

@@ -38,8 +38,15 @@ struct thread {
 You may add or change arguments to the functions in the API. You may also add
 new functions to the API.
 ********************************************************************************/
+void scheduler();
 
+void init_context(ucontext_t *ctx, ucontext_t *next);
 
+void set_timer (void (*handler) (int), int ms);
+
+void disable_timer ();
+
+void timer_handler (int signum);
 /* Initialization
 
    Initialization of global thread management data structures. A user program
