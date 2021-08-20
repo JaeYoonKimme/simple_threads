@@ -120,14 +120,16 @@ void magic_numbers() {
 }
 
 int id = 0;
+int count = 0;
 void counter() {
-	int count = 0;
+	//int count = 0;
 	int own_id = id ++;
-	while(true){
-		printf("id : %d -> count : %d\n",own_id,count);
+	
+	for(int i = 0; i < 100000; i++){
+		printf("id : %d -> count : %d\n",own_id,i);
 		count ++;
 		
-		if(count == 100000){
+		if(i == 100000){
 			done();
 		}
 	}
@@ -140,24 +142,6 @@ void counter() {
 ********************************************************************************/
 void test_senario1(){
 	puts("\n==== Test program for the Simple Threads API ====\n");
-		init(); // Initialization
-		spawn(counter);
-		printf("spawned counter1\n");
-		spawn(counter);
-		printf("Spawned counter2\n");
-		spawn(counter);
-		printf("spawned counter3\n");
-		spawn(counter);
-		printf("spawned counter4\n");
-		while(true){
-			yield();
-		}
-
-}
-
-
-int main(){
-	puts("\n==== Test program for the Simple Threads API ====\n");
 	init(); // Initialization
 	spawn(counter);
 	printf("spawned counter1\n");
@@ -167,15 +151,75 @@ int main(){
 	printf("spawned counter3\n");
 	spawn(counter);
 	printf("spawned counter4\n");
-
-	//while(true){
-	join();
-	join();
-	join();
-	join();
+		//while(true){
+	int one = join();
+	int two = join();
+	int three = join();
+	int four = join();
 	//yield();
 	//join();	
 	//while(1){
 	//}
-	printf("All done\n");
+	printf("All done %d %d %d %d\n", one, two, three, four);
+
+
+}
+
+mutex_t m;
+
+
+void
+worker()
+{
+	//int own_id = id++;
+	mutex_lock(&m);
+	for(int i = 0; i < 1000000; i ++){
+		//printf("%d -> %d\n",own_id,i);
+		int tmp = count;
+		tmp ++;
+		count = tmp;
+	}
+	mutex_unlock(&m);
+	done();
+}
+
+
+int chkr = 0;
+mutex_t mutex;
+void
+test1()
+{
+  while(1){
+    printf("1 locking\n");
+    mutex_lock(&mutex);
+    // cond_wait(&cond, &mutex);
+    printf("========here %d\n", chkr++);
+    mutex_unlock(&mutex);
+    printf("1 unlocking\n");
+  }
+}
+void
+test2()
+{
+  while(1){
+    printf("2 locking\n");
+    mutex_lock(&mutex);
+    // cond_signal(&cond);
+    printf("-------there %d\n", chkr++);
+    mutex_unlock(&mutex);
+    printf("2 unlocking\n");
+  }
+}
+
+
+int main(){
+	puts("\n==== Test program for the Simple Threads API ====\n");
+	init(); // Initialization
+	spawn(test1);
+	spawn(test2);
+
+
+	join();
+	join();
+	//printf("alldone. result count : %d\n",count);
 }

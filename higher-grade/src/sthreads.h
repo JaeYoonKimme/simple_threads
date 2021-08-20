@@ -32,6 +32,20 @@ struct thread {
 };
 
 
+typedef struct mutex mutex_t;
+
+struct mutex {
+	int flag;
+};
+
+
+typedef struct cond cond_t;
+
+struct cond {
+	int flag;
+};
+
+
 /*******************************************************************************
                                Simple Threads API
 
@@ -44,7 +58,7 @@ void init_context(ucontext_t *ctx, ucontext_t *next);
 
 void set_timer (void (*handler) (int), int ms);
 
-void disable_timer ();
+long disable_timer ();
 
 void timer_handler (int signum);
 /* Initialization
@@ -92,5 +106,22 @@ void  done();
    terminated thread.
 */
 tid_t join();
+
+/*******************************************************************************
+                               Simple Threads API LEVEL 2
+MUTEX, CONDITIONAL VARIABLE, SEMAPHORE
+
+********************************************************************************/
+void mutex_init(mutex_t* mutex);
+
+void mutex_lock(mutex_t* mutex);
+
+void mutex_unlock(mutex_t* mutex);
+
+
+
+
+void cond_wait(cond_t * cond, mutex_t * mutex);
+
 
 #endif

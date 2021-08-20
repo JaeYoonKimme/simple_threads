@@ -51,7 +51,10 @@ scheduler ()
 			if(cursor != 0x0 && cursor -> state == ready){
 				cursor -> state = running;
 				set_timer(timer_handler, MS);
-				swapcontext(&sched_ctx, &(cursor -> ctx));
+				if(swapcontext(&sched_ctx, &(cursor -> ctx)) < 0){
+					perror("swap_sched");
+					exit(EXIT_FAILURE);
+				}
 			}
 		}
 	}
@@ -82,16 +85,10 @@ void
 set_timer (void (*handler) (int), int ms)
 {
 	struct itimerval timer;
-	//struct sigaction sa;
-
-	//memset(&sa, 0, sizeof(sa));
-	//sa.sa_handler = handler;
-	//sigaction(SIGALRM, &sa, NULL);
-
 	signal(SIGALRM, handler);
 
 	timer.it_value.tv_sec = 0;
-	timer.it_value.tv_usec = ms*1000;
+	timer.it_value.tv_usec = 100;
 	timer.it_interval.tv_sec = 0;
 	timer.it_interval.tv_usec = 0;
 
@@ -100,20 +97,23 @@ set_timer (void (*handler) (int), int ms)
 		exit(EXIT_FAILURE);
 	}
 }
-
-void
+	
+long
 disable_timer ()
 {
 	struct itimerval timer;
+	struct itimerval old;
 	timer.it_value.tv_sec = 0;
 	timer.it_value.tv_usec = 0;
 	timer.it_interval.tv_sec = 0;
 	timer.it_interval.tv_usec = 0;
 
-	if(setitimer(ITIMER_REAL, &timer, 0x0) < 0){
+	if(setitimer(ITIMER_REAL, &timer, &old) < 0){
 		perror("disable timer set");
 		exit(EXIT_FAILURE);
 	}
+
+	return old.it_value.tv_usec;
 }
 
 void
@@ -148,7 +148,7 @@ int init (){
 	}
 
 	ucontext_t main_ctx;	
-	init_context(&main_ctx, 0x0);
+	init_context(&main_ctx, 0);
 
 	main_thread->ctx = main_ctx;
 	main_thread->tid = ++tidnum;
@@ -158,7 +158,10 @@ int init (){
 	tail = main_thread;
 
 	//init main context
-	swapcontext(&main_ctx,&sched_ctx);
+	if(swapcontext(&(main_thread -> ctx), &sched_ctx) < 0){
+		perror("swap init");
+		exit(EXIT_FAILURE);
+	}
 	set_timer(timer_handler,MS);
 	return 1;
 }
@@ -174,7 +177,7 @@ spawn (void (*start)())
 	}
 
 	ucontext_t new_ctx;
-	init_context(&new_ctx, NULL);
+	init_context(&new_ctx, &sched_ctx);
 	makecontext(&new_ctx, start, 0);
 	new_thread->ctx = new_ctx;
 	new_thread->tid = ++tidnum;
@@ -189,7 +192,7 @@ spawn (void (*start)())
 void 
 yield ()
 {
-	disable_timer();//
+	disable_timer();
 	thread_t *cur_thread = cursor;
 	if(cur_thread -> state != running){
 		if(cur_thread -> state == terminated){
@@ -204,8 +207,10 @@ yield ()
 
 	cur_thread -> state = ready;
 
-	//set_timer(timer_handler, MS);//
-	swapcontext(&(cur_thread -> ctx), &sched_ctx);
+	if(swapcontext(&(cur_thread -> ctx), &sched_ctx) < 0){
+		perror("swap yield");
+		exit(EXIT_FAILURE);
+	}
 }
 
 void
@@ -213,20 +218,28 @@ done ()
 {
 	disable_timer();
 	thread_t *cur_thread = cursor;
-	
-	thread_t *itr;
-	for(itr = table -> next; itr != 0x0; itr = itr -> next){
-		if(itr -> state == waiting){
-			itr -> state = ready;
+
+	while(1){
+		int found = 0;
+		for(thread_t *itr = table -> next; itr != 0x0; itr = itr -> next){
+			if(itr -> state == waiting){
+				itr -> state = ready;
+				found = 1;
+			}
 		}
-	}
-	if(itr == 0x0){
-		yield();
+		if(found == 0){
+			yield();
+		}
+		else{
+			break;
+		}
 	}
 	
 	cur_thread -> state = terminated;
-	//set_timer(timer_handler,MS);
-	swapcontext(&(cur_thread -> ctx), &sched_ctx);
+	if(swapcontext(&(cur_thread -> ctx), &sched_ctx) < 0){
+		perror("swap done");
+		exit(EXIT_FAILURE);
+	}
 }
 
 tid_t 
@@ -235,10 +248,12 @@ join ()
 	disable_timer();
 	thread_t *cur_thread = cursor;
 	cursor -> state = waiting;
-	//set_timer(timer_handler,MS);
-	swapcontext(&(cur_thread -> ctx), &sched_ctx);
-
-	tid_t tid;
+	if(swapcontext(&(cur_thread -> ctx), &sched_ctx) < 0){
+		perror("swap join");
+		exit(EXIT_FAILURE);
+	}
+	disable_timer();
+	tid_t tid = -1;
 	for(thread_t * itr = table; itr != 0x0; itr = itr -> next){
 		if(itr -> next != 0x0 && itr -> next -> state == terminated){
 			thread_t * gone = itr -> next;
@@ -250,7 +265,54 @@ join ()
 			}
 			free(gone -> ctx.uc_stack.ss_sp);
 			free(gone);
+			break;
 		}
 	}
+	set_timer(timer_handler, MS);
 	return tid;
 }
+
+/*******************************************************************************
+                    Implementation of thread MUTEX LOCK API
+********************************************************************************/
+void
+mutex_init (mutex_t* mutex)
+{
+	//0 -> available 
+	//1 -> held
+	mutex -> flag = 0;
+}
+
+void
+mutex_lock (mutex_t* mutex)
+{	
+	long old = disable_timer();	
+	while(mutex -> flag == 1){
+		//set_timer(timer_handler, old/1000);
+		yield();
+	}
+
+	mutex -> flag = 1;
+	set_timer(timer_handler, old/1000);
+}
+
+void
+mutex_unlock (mutex_t* mutex)
+{
+	long old = disable_timer();
+	mutex -> flag = 0;
+	set_timer(timer_handler, old/1000);
+}
+
+
+void
+cond_wait (cond_t * cond, mutex_t * mutex)
+{
+
+}
+
+
+
+
+
+
